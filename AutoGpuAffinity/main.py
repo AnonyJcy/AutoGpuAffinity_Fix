@@ -248,7 +248,7 @@ def display_results(csv_directory: str, enable_color: bool) -> None:
 
             formatted_results[_cpu][metric] = new_value
 
-    os.system("<nul set /p=\x1b[8;50;1000t")
+    # os.system("<nul set /p=\x1b[8;50;1000t")
 
     print_table(formatted_results)
 
@@ -434,11 +434,16 @@ def main() -> int:
     if cfg.settings.api == Api.LIBLAVA:
         subject_args = [
             f"--fullscreen={int(cfg.liblava.fullscreen)}",
-            f"--width={cfg.liblava.x_resolution}",
-            f"--height={cfg.liblava.y_resolution}",
+        ]
+        if not cfg.liblava.fullscreen:
+            subject_args.extend([
+                f"--width={cfg.liblava.x_resolution}",
+                f"--height={cfg.liblava.y_resolution}",
+            ])
+        subject_args.extend([
             f"--fps_cap={cfg.liblava.fps_cap}",
             f"--triple_buffering={int(cfg.liblava.triple_buffering)}",
-        ]
+        ])
 
     # this will create all of the required folders
     os.makedirs(f"{session_directory}\\CSVs", exist_ok=True)
