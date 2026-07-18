@@ -52,7 +52,7 @@ class Config:
             raise FileNotFoundError(error_msg)
 
         config = ConfigParser(delimiters="=")
-        config.read(config_path)
+        config.read(config_path, encoding="utf-8")
 
         apis: dict[int, Api] = {
             1: Api.LIBLAVA,
