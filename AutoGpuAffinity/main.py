@@ -5,6 +5,8 @@ import datetime
 import logging
 import json
 import os
+import re
+import math
 
 import subprocess
 import sys
@@ -18,6 +20,7 @@ import consts
 import framerate
 import display
 import renderer
+import presentation
 from gpu import Gpu, select_gpu, match_vulkan, query_vulkan_adapters, wait_vulkan_device, vulkan_query_worker
 import psutil
 import setupapi
@@ -25,6 +28,22 @@ import wmi
 from config import Api, Config
 
 LOG_CLI = logging.getLogger("CLI")
+INSTANCE_GUARD = None
+
+
+def lock_benchmark():
+    global INSTANCE_GUARD
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.wintypes.BOOL, ctypes.c_wchar_p]
+    kernel32.CreateMutexW.restype = ctypes.wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+    handle = kernel32.CreateMutexW(None, False, r'Local\AutoGpuAffinity-benchmark')
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if ctypes.get_last_error() == 183:
+        kernel32.CloseHandle(handle)
+        raise RuntimeError('Another AutoGpuAffinity benchmark is running; close it before starting this session.')
+    INSTANCE_GUARD = handle
 
 
 def start_afterburner(path: str, profile: int) -> None:
@@ -138,6 +157,38 @@ def apply_affinity(hwids: list[str], cpu: int = -1, apply: bool = True) -> int:
     return 0
 
 
+def snapshot_affinity(hwid):
+    path = f'SYSTEM\\CurrentControlSet\\Enum\\{hwid}\\Device Parameters\\Interrupt Management\\Affinity Policy'
+    values = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+            for name in ('DevicePolicy', 'AssignmentSetOverride'):
+                try:
+                    values[name] = winreg.QueryValueEx(key, name)
+                except FileNotFoundError:
+                    values[name] = None
+    except FileNotFoundError:
+        values = {name: None for name in ('DevicePolicy', 'AssignmentSetOverride')}
+    return values
+
+
+def restore_affinity(hwid, values):
+    path = f'SYSTEM\\CurrentControlSet\\Enum\\{hwid}\\Device Parameters\\Interrupt Management\\Affinity Policy'
+    with winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, path) as key:
+        for name, original in values.items():
+            if original is None:
+                try:
+                    winreg.DeleteValue(key, name)
+                except FileNotFoundError:
+                    pass
+            else:
+                winreg.SetValueEx(key, name, 0, original[1], original[0])
+    if snapshot_affinity(hwid) != values:
+        raise RuntimeError('Target GPU original affinity could not be restored')
+    if restart_driver(hwid) != 0:
+        raise RuntimeError('Failed to restart target GPU after restoring original affinity')
+
+
 def print_table(formatted_results: dict[str, dict[str, str]]):
     # print table headings
     print(f"{'CPU':<5}", end="")
@@ -174,6 +225,12 @@ def print_table(formatted_results: dict[str, dict[str, str]]):
 
 
 def display_results(csv_directory: str, enable_color: bool) -> None:
+    status_path = os.path.join(os.path.dirname(os.path.abspath(csv_directory)), 'session-status.json')
+    if os.path.exists(status_path):
+        with open(status_path, encoding='utf-8') as report:
+            status = json.load(report)
+        if status.get('status') != 'complete':
+            raise RuntimeError('This session failed or is incomplete; refusing to rank its captures. See session-status.json.')
     results: dict[str, dict[str, float]] = {}
 
     # each index represents the rank (e.g. index 0 is 1st)
@@ -188,7 +245,10 @@ def display_results(csv_directory: str, enable_color: bool) -> None:
     else:
         default = ""
 
-    cpus = sorted([int(file.strip("CPU-.csv")) for file in os.listdir(csv_directory)])
+    cpus = sorted(int(match.group(1)) for file in os.listdir(csv_directory)
+                  if (match := re.fullmatch(r'CPU-(\d+)\.csv', file)))
+    if not cpus:
+        raise RuntimeError('No CPU capture CSVs found in the session')
     num_cpus = len(cpus)
     # 1 CPUs means no ranking will be done
     # 2 CPUs means only one metric will be ranked since it can be either or
@@ -207,8 +267,14 @@ def display_results(csv_directory: str, enable_color: bool) -> None:
                 row_lower = {key.lower(): value for key, value in row.items()}
 
                 if (ms_between_presents := row_lower.get("msbetweenpresents")) is not None:
-                    if float(ms_between_presents) > 0:
-                        frametimes.append(float(ms_between_presents))
+                    value = float(ms_between_presents)
+                    if not math.isfinite(value) or value < 0:
+                        raise RuntimeError(f'Invalid frame time in {csv_file}')
+                    if value > 0:
+                        frametimes.append(value)
+
+        if len(frametimes) < 2:
+            raise RuntimeError(f'Fewer than two valid frames in {csv_file}')
 
         fps = framerate.Fps(frametimes)
 
@@ -373,9 +439,12 @@ def main() -> int:
     cfg = Config(config_path)
     if cfg.validate_config() != 0:
         return 1
+    if cpu_count >= 64:
+        raise ValueError('Systems with more than 64 logical CPUs need processor-group affinity support; this version will not guess a mask.')
     target_gpu = select_gpu(gpus, cfg.settings.gpu)
     hwids_gpu = [target_gpu.hwid]
     LOG_CLI.info("Target GPU: %s [%s]", target_gpu.name, target_gpu.hwid)
+    lock_benchmark()
 
     if args.apply_affinity is not None:
         if not 0 <= args.apply_affinity <= cpu_count:
@@ -447,6 +516,9 @@ def main() -> int:
     if width <= 0 or height <= 0:
         raise ValueError("Display dimensions must be positive")
     LOG_CLI.info("Resolution: %dx%d; forced fullscreen: %s", width, height, cfg.settings.force_fullscreen)
+    refresh_rate = display.primary_refresh_rate()
+    LOG_CLI.info('Primary display refresh: %s Hz; fullscreen composition: %s',
+                 refresh_rate, cfg.settings.fullscreen_composition)
     subject_args: list[str] = []
     if cfg.settings.api == Api.LIBLAVA:
         try:
@@ -462,6 +534,7 @@ def main() -> int:
             f"--fullscreen={int(cfg.liblava.fullscreen and not cfg.settings.force_fullscreen)}",
             f"--width={width}", f"--height={height}",
             f"--fps_cap={cfg.liblava.fps_cap}",
+            '--v_sync=0',
             f"--triple_buffering={int(cfg.liblava.triple_buffering)}",
         ]
     elif len(gpus) > 1:
@@ -487,8 +560,21 @@ def main() -> int:
                 LOG_CLI.exception(e)
                 raise
 
-    kill_processes("xperf.exe", api_binname, presentmon_binary)
-
+    overlay = None
+    subject = None
+    original_affinity = snapshot_affinity(target_gpu.hwid)
+    composition_mode = True if cfg.settings.fullscreen_composition == 'always' else (
+        False if cfg.settings.fullscreen_composition == 'never' else None)
+    completed_cpus = []
+    session_state = {'status': 'running', 'requested_cpus': benchmark_cpus,
+                     'target_gpu': target_gpu.name, 'refresh_rate': refresh_rate}
+    status_path = os.path.join(session_directory, 'session-status.json')
+    def save_status():
+        session_state['completed_cpus'] = completed_cpus
+        session_state['fullscreen_composition'] = composition_mode
+        with open(status_path, 'w', encoding='utf-8') as report:
+            json.dump(session_state, report, ensure_ascii=False, indent=2)
+    save_status()
     try:
         for cpu in benchmark_cpus:
             LOG_CLI.info("benchmarking CPU %d", cpu)
@@ -536,6 +622,8 @@ def main() -> int:
             if cfg.settings.force_fullscreen:
                 display.force_fullscreen(subject, width, height)
                 LOG_CLI.info('Verified borderless fullscreen bounds: (0, 0, %d, %d)', width, height)
+                if composition_mode and cfg.settings.api == Api.LIBLAVA:
+                    overlay = presentation.StatusOverlay(subject.pid, f'AutoGpuAffinity - CPU {cpu} / composed')
 
             # 5s offset to allow subject to launch
             time.sleep(5 + cfg.settings.cache_duration)
@@ -543,29 +631,53 @@ def main() -> int:
             if subject.poll() is not None:
                 raise RuntimeError(f"Benchmark exited during warmup. See {log_path}")
 
+            pm_binary = f'bin\\PresentMon\\{presentmon_binary}'
+            if cfg.settings.api == Api.LIBLAVA and cfg.settings.force_fullscreen and composition_mode is None:
+                preflight_directory = os.path.join(session_directory, 'presentation-preflight')
+                initial = presentation.capture(pm_binary, subject, 3,
+                    os.path.join(preflight_directory, 'direct.csv'))
+                capped = cfg.liblava.fps_cap == 0 and presentation.refresh_paced(initial, refresh_rate)
+                initial_report = {'direct': presentation.public_stats(initial), 'refresh_limit_suspected': capped}
+                composition_mode = False
+                if capped:
+                    LOG_CLI.warning('Fullscreen trace is paced at %s Hz (%.2f FPS). Testing the status-overlay composition path.',
+                                    refresh_rate, initial['average_fps'])
+                    overlay = presentation.StatusOverlay(subject.pid, f'AutoGpuAffinity - CPU {cpu} / composed')
+                    time.sleep(1)
+                    alternative = presentation.capture(pm_binary, subject, 3,
+                        os.path.join(preflight_directory, 'composed.csv'))
+                    overlay.check()
+                    initial_report['composed'] = presentation.public_stats(alternative)
+                    recovered = (not presentation.refresh_paced(alternative, refresh_rate)
+                                 and alternative['average_fps'] > initial['average_fps'] * 1.10)
+                    initial_report['recovery_verified'] = recovered
+                    with open(os.path.join(preflight_directory, 'result.json'), 'w', encoding='utf-8') as report:
+                        json.dump(initial_report, report, indent=2)
+                    if not recovered:
+                        raise RuntimeError('Fullscreen refresh pacing could not be removed. See presentation-preflight; this session will not be ranked.')
+                    composition_mode = True
+                    LOG_CLI.info('Fullscreen composition verified: %.2f -> %.2f FPS. Keeping this presentation mode for all CPUs.',
+                                 initial['average_fps'], alternative['average_fps'])
+                else:
+                    with open(os.path.join(preflight_directory, 'result.json'), 'w', encoding='utf-8') as report:
+                        json.dump(initial_report, report, indent=2)
+                save_status()
+
             if cfg.xperf.enabled:
                 subprocess.run(
                     [cfg.xperf.location, "-on", "base+interrupt+dpc"],
                     check=True,
                 )
 
-            subprocess.run(
-                [
-                    f"bin\\PresentMon\\{presentmon_binary}",
-                    "-stop_existing_session",
-                    "-no_top",
-                    "-timed",
-                    str(cfg.settings.benchmark_duration),
-                    "-process_id",
-                    str(subject.pid),
-                    "-output_file",
-                    f"{session_directory}\\CSVs\\CPU-{cpu}.csv",
-                    "-terminate_after_timed",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=True,
-            )
+            if overlay:
+                overlay.check()
+            stats = presentation.capture(pm_binary, subject, cfg.settings.benchmark_duration,
+                f'{session_directory}\\CSVs\\CPU-{cpu}.csv')
+            if overlay:
+                overlay.check()
+            if (cfg.settings.api == Api.LIBLAVA and cfg.settings.force_fullscreen
+                    and cfg.liblava.fps_cap == 0 and presentation.refresh_paced(stats, refresh_rate)):
+                raise RuntimeError(f'CPU {cpu} capture is refresh-paced; session will not be ranked. See CSV and native logs.')
 
             if subject.poll() is not None:
                 raise RuntimeError(f"Benchmark exited during capture. See {log_path}")
@@ -583,6 +695,9 @@ def main() -> int:
                     renderer.stop(subject)
                     render_name = renderer.verify_log(log_path, target_gpu)
                     LOG_CLI.info('Actual capture renderer GPU: %s (PID %d)', render_name, subject.pid)
+                if overlay:
+                    overlay.close()
+                    overlay = None
                 evidence = {
                     'cpu': cpu, 'target_name': target_gpu.name, 'target_pnp_id': target_gpu.hwid,
                     'renderer_name': render_name, 'renderer_pid': subject.pid,
@@ -591,6 +706,8 @@ def main() -> int:
                     'process_affinity': process_affinity,
                     'capture_seconds': cfg.settings.benchmark_duration,
                     'valid_present_frames': len(valid_frames), 'csv_path': os.path.abspath(csv_path),
+                    'refresh_rate': refresh_rate, 'fullscreen_composition': composition_mode,
+                    'presentation': presentation.public_stats(stats),
                 }
                 policy_path = f'SYSTEM\\CurrentControlSet\\Enum\\{target_gpu.hwid}\\Device Parameters\\Interrupt Management\\Affinity Policy'
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, policy_path) as key:
@@ -599,6 +716,8 @@ def main() -> int:
                 with open(os.path.join(session_directory, f'CPU-{cpu}-validation.json'), 'w', encoding='utf-8') as report:
                     json.dump(evidence, report, ensure_ascii=False, indent=2)
                 LOG_CLI.info('Captured %d valid present frames from PID %d', len(valid_frames), subject.pid)
+                completed_cpus.append(cpu)
+                save_status()
 
             if not os.path.exists(csv_path):
                 LOG_CLI.error(
@@ -639,20 +758,49 @@ def main() -> int:
                 if not cfg.xperf.save_etls:
                     os.remove(f"{session_directory}\\xperf\\CPU-{cpu}.etl")
 
-            kill_processes("xperf.exe", api_binname, presentmon_binary)
+            if subject is not None and subject.poll() is None:
+                renderer.stop(subject)
 
+    except BaseException as error:
+        session_state['status'] = 'failed'
+        session_state['error'] = str(error) or type(error).__name__
+        save_status()
+        raise
     finally:
         try:
-            kill_processes("xperf.exe", api_binname, presentmon_binary)
+            if overlay:
+                overlay.close()
+            if subject is not None and subject.poll() is None:
+                try:
+                    renderer.stop(subject)
+                except RuntimeError:
+                    LOG_CLI.exception('Failed to close renderer normally')
             if cfg.xperf.enabled:
                 subprocess.run([cfg.xperf.location, "-stop"], check=False,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         finally:
-            if apply_affinity(hwids_gpu, apply=False) != 0:
-                raise RuntimeError("Failed to reset target GPU affinity")
-            if cfg.settings.api == Api.LIBLAVA:
-                wait_vulkan_device(target_gpu)
-            LOG_CLI.info('Target GPU affinity reset; driver recovery verified')
+            try:
+                restore_affinity(target_gpu.hwid, original_affinity)
+                if cfg.settings.api == Api.LIBLAVA:
+                    wait_vulkan_device(target_gpu)
+                LOG_CLI.info('Original target GPU affinity restored; driver recovery verified')
+            except BaseException as error:
+                session_state['status'] = 'failed'
+                session_state['cleanup_error'] = str(error) or type(error).__name__
+                save_status()
+                raise
+            if completed_cpus != benchmark_cpus:
+                session_state['status'] = 'failed'
+                session_state.setdefault('error', 'Not every requested CPU completed')
+                save_status()
+
+    if completed_cpus != benchmark_cpus:
+        session_state['status'] = 'failed'
+        save_status()
+        raise RuntimeError('Session did not finish every requested CPU')
+    session_state['status'] = 'complete'
+    session_state['driver_recovery_verified'] = True
+    save_status()
 
     if os.path.exists("C:\\kernel.etl"):
         os.remove("C:\\kernel.etl")
@@ -678,6 +826,9 @@ def _main() -> NoReturn:
         exit_code = 1
     finally:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if INSTANCE_GUARD is not None:
+            kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+            kernel32.CloseHandle(INSTANCE_GUARD)
         process_array = (ctypes.c_uint * 1)()
         num_processes = kernel32.GetConsoleProcessList(process_array, 1)
 
@@ -692,4 +843,6 @@ if __name__ == "__main__":
     # Dispatch before elevation/config/WMI and the interactive exit pause.
     if sys.argv[1:] == ['--vulkan-query']:
         sys.exit(vulkan_query_worker())
+    if len(sys.argv) == 5 and sys.argv[1] == '--presentation-overlay':
+        sys.exit(presentation.overlay_worker(int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]))
     _main()
