@@ -1,4 +1,11 @@
-AutoGpuAffinity/lava.log
-AutoGpuAffinity/captures
-*.pyc
+__pycache__/
+*.py[cod]
+.venv/
+venv/
 build/
+dist/
+captures/
+diagnostics/
+*.log
+*.etl
+*.spec

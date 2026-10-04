@@ -3,8 +3,9 @@ import csv
 import ctypes
 import datetime
 import logging
+import json
 import os
-import shutil
+
 import subprocess
 import sys
 import textwrap
@@ -15,6 +16,9 @@ from typing import NoReturn
 
 import consts
 import framerate
+import display
+import renderer
+from gpu import Gpu, select_gpu, match_vulkan, query_vulkan_adapters, wait_vulkan_device, vulkan_query_worker
 import psutil
 import setupapi
 import wmi
@@ -34,41 +38,45 @@ def set_driver_state(hwid: str, state: int) -> int:
         None, ctypes.c_wchar_p(hwid), None, setupapi.DIGCF_ALLCLASSES | setupapi.DIGCF_DEVICEINTERFACE
     )
 
-    if device_info_handle == -1:
-        LOG_CLI.error(f"SetupDiGetClassDevsW failed: {ctypes.GetLastError()}")
+    if device_info_handle == ctypes.c_void_p(-1).value:
+        LOG_CLI.error(f"SetupDiGetClassDevsW failed: {ctypes.get_last_error()}")
         return 1
 
-    dev_info_data = setupapi.SP_DEVINFO_DATA()
-    dev_info_data.cbSize = ctypes.sizeof(setupapi.SP_DEVINFO_DATA)
+    try:
+        dev_info_data = setupapi.SP_DEVINFO_DATA()
+        dev_info_data.cbSize = ctypes.sizeof(setupapi.SP_DEVINFO_DATA)
 
-    if not setupapi.SetupDiEnumDeviceInfo(device_info_handle, 0, ctypes.byref(dev_info_data)):
-        LOG_CLI.error(f"SetupDiEnumDeviceInfo failed: {ctypes.GetLastError()}")
-        return 1
+        if not setupapi.SetupDiEnumDeviceInfo(device_info_handle, 0, ctypes.byref(dev_info_data)):
+            LOG_CLI.error(f"SetupDiEnumDeviceInfo failed: {ctypes.get_last_error()}")
+            return 1
 
-    params = setupapi.SP_PROPCHANGE_PARAMS()
+        params = setupapi.SP_PROPCHANGE_PARAMS()
 
-    params.ClassInstallHeader.cbSize = ctypes.sizeof(params.ClassInstallHeader)
-    params.ClassInstallHeader.InstallFunction = setupapi.DIF_PROPERTYCHANGE
-    params.StateChange = state
-    params.Scope = setupapi.DICS_FLAG_GLOBAL
-    params.HwProfile = 0
+        params.ClassInstallHeader.cbSize = ctypes.sizeof(params.ClassInstallHeader)
+        params.ClassInstallHeader.InstallFunction = setupapi.DIF_PROPERTYCHANGE
+        params.StateChange = state
+        params.Scope = setupapi.DICS_FLAG_GLOBAL
+        params.HwProfile = 0
 
-    if not setupapi.SetupDiSetClassInstallParamsA(
-        device_info_handle,
-        ctypes.byref(dev_info_data),
-        ctypes.byref(params.ClassInstallHeader),
-        ctypes.sizeof(params),
-    ):
-        LOG_CLI.error(f"SetupDiSetClassInstallParamsA failed: {ctypes.GetLastError()}")
-        return 1
+        if not setupapi.SetupDiSetClassInstallParamsA(
+            device_info_handle,
+            ctypes.byref(dev_info_data),
+            ctypes.byref(params.ClassInstallHeader),
+            ctypes.sizeof(params),
+        ):
+            LOG_CLI.error(f"SetupDiSetClassInstallParamsA failed: {ctypes.get_last_error()}")
+            return 1
 
-    if not setupapi.SetupDiCallClassInstaller(
-        setupapi.DIF_PROPERTYCHANGE, device_info_handle, ctypes.byref(dev_info_data)
-    ):
-        LOG_CLI.error(f"SetupDiCallClassInstaller failed: {ctypes.GetLastError()}")
-        return 1
+        if not setupapi.SetupDiCallClassInstaller(
+            setupapi.DIF_PROPERTYCHANGE, device_info_handle, ctypes.byref(dev_info_data)
+        ):
+            LOG_CLI.error(f"SetupDiCallClassInstaller failed: {ctypes.get_last_error()}")
+            return 1
 
-    return 0
+        return 0
+
+    finally:
+        setupapi.SetupDiDestroyDeviceInfoList(device_info_handle)
 
 
 def restart_driver(hwid: str) -> int:
@@ -76,11 +84,13 @@ def restart_driver(hwid: str) -> int:
         LOG_CLI.error("failed to disable driver while restarting")
         return 1
 
-    time.sleep(2)
-
-    if set_driver_state(hwid, setupapi.DICS_ENABLE) != 0:
-        LOG_CLI.error("failed to enable driver while restarting")
-        return 1
+    try:
+        time.sleep(2)
+    finally:
+        # Even Ctrl+C during the disabled interval must re-enable the device.
+        enable_result = set_driver_state(hwid, setupapi.DICS_ENABLE)
+    if enable_result != 0:
+        raise RuntimeError(f'Failed to re-enable GPU {hwid}')
 
     time.sleep(2)
 
@@ -89,7 +99,7 @@ def restart_driver(hwid: str) -> int:
 
 def apply_affinity(hwids: list[str], cpu: int = -1, apply: bool = True) -> int:
     for hwid in hwids:
-        policy_path = f"SYSTEM\\ControlSet001\\Enum\\{hwid}\\Device Parameters\\Interrupt Management\\Affinity Policy"
+        policy_path = f"SYSTEM\\CurrentControlSet\\Enum\\{hwid}\\Device Parameters\\Interrupt Management\\Affinity Policy"
 
         if apply and cpu > -1:
             mask = 1 << cpu
@@ -113,8 +123,11 @@ def apply_affinity(hwids: list[str], cpu: int = -1, apply: bool = True) -> int:
                     0,
                     winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY,
                 ) as key:
-                    winreg.DeleteValue(key, "DevicePolicy")
-                    winreg.DeleteValue(key, "AssignmentSetOverride")
+                    for value in ('DevicePolicy', 'AssignmentSetOverride'):
+                        try:
+                            winreg.DeleteValue(key, value)
+                        except FileNotFoundError:
+                            pass
             except FileNotFoundError:
                 LOG_CLI.debug("affinity policy has already been removed for %s", hwid)
 
@@ -194,7 +207,8 @@ def display_results(csv_directory: str, enable_color: bool) -> None:
                 row_lower = {key.lower(): value for key, value in row.items()}
 
                 if (ms_between_presents := row_lower.get("msbetweenpresents")) is not None:
-                    frametimes.append(float(ms_between_presents))
+                    if float(ms_between_presents) > 0:
+                        frametimes.append(float(ms_between_presents))
 
         fps = framerate.Fps(frametimes)
 
@@ -279,6 +293,8 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="assign a single core affinity to graphics drivers",
     )
+    parser.add_argument('--non-interactive', action='store_true',
+                        help='skip start and exit prompts for unattended validation')
 
     return parser.parse_args()
 
@@ -313,7 +329,8 @@ def main() -> int:
 
     winver = sys.getwindowsversion()
 
-    hwids_gpu: list[str] = [gpu.PnPDeviceID for gpu in wmi.WMI().Win32_VideoController()]
+    gpus = [Gpu(g.Name, g.PnPDeviceID) for g in wmi.WMI().Win32_VideoController() if g.PnPDeviceID]
+    hwids_gpu = [g.hwid for g in gpus]
 
     if not hwids_gpu:
         LOG_CLI.error("no graphics cards found")
@@ -352,7 +369,15 @@ def main() -> int:
         )
         return 1
 
-    if args.apply_affinity:
+    config_path = args.config if args.config is not None else "config.ini"
+    cfg = Config(config_path)
+    if cfg.validate_config() != 0:
+        return 1
+    target_gpu = select_gpu(gpus, cfg.settings.gpu)
+    hwids_gpu = [target_gpu.hwid]
+    LOG_CLI.info("Target GPU: %s [%s]", target_gpu.name, target_gpu.hwid)
+
+    if args.apply_affinity is not None:
         if not 0 <= args.apply_affinity <= cpu_count:
             LOG_CLI.error("invalid affinity specified %d", args.apply_affinity)
             return 1
@@ -366,18 +391,6 @@ def main() -> int:
 
     presentmon_version = "1.10.0" if winver.major >= 10 and winver.product_type != 3 else "1.6.0"
     presentmon_binary = f"PresentMon-{presentmon_version}-x64.exe"
-
-    config_path = args.config if args.config is not None else "config.ini"
-
-    try:
-        cfg = Config(config_path)
-    except FileNotFoundError as e:
-        LOG_CLI.exception(e)
-        return 1
-
-    if cfg.validate_config() != 0:
-        LOG_CLI.error("failed to validate config")
-        return 1
 
     api_binpaths: dict[Api, str] = {
         Api.LIBLAVA: "bin\\liblava\\lava-triangle.exe",
@@ -426,24 +439,33 @@ def main() -> int:
         ),
     )
 
-    if not cfg.settings.skip_confirmation:
+    if not cfg.settings.skip_confirmation and not args.non_interactive:
         input("press enter to start benchmarking...")
 
+    width, height = (display.primary_resolution() if cfg.settings.auto_resolution
+                     else (cfg.liblava.x_resolution, cfg.liblava.y_resolution))
+    if width <= 0 or height <= 0:
+        raise ValueError("Display dimensions must be positive")
+    LOG_CLI.info("Resolution: %dx%d; forced fullscreen: %s", width, height, cfg.settings.force_fullscreen)
     subject_args: list[str] = []
-
     if cfg.settings.api == Api.LIBLAVA:
+        try:
+            physical_device = match_vulkan(target_gpu, query_vulkan_adapters())
+        except (OSError, RuntimeError) as e:
+            LOG_CLI.warning("Standalone Vulkan query failed: %s. Probing renderer directly.", e)
+            physical_device = renderer.probe_device(api_binpath, target_gpu, len(gpus) + 2,
+                                                    os.path.join(session_directory, "renderer-logs"))
+        LOG_CLI.info("Vulkan physical device index: %d", physical_device)
+        # Borderless mode permits cross-adapter presentation on mining GPU drivers.
         subject_args = [
-            f"--fullscreen={int(cfg.liblava.fullscreen)}",
-        ]
-        if not cfg.liblava.fullscreen:
-            subject_args.extend([
-                f"--width={cfg.liblava.x_resolution}",
-                f"--height={cfg.liblava.y_resolution}",
-            ])
-        subject_args.extend([
+            f"--physical_device={physical_device}",
+            f"--fullscreen={int(cfg.liblava.fullscreen and not cfg.settings.force_fullscreen)}",
+            f"--width={width}", f"--height={height}",
             f"--fps_cap={cfg.liblava.fps_cap}",
             f"--triple_buffering={int(cfg.liblava.triple_buffering)}",
-        ])
+        ]
+    elif len(gpus) > 1:
+        raise ValueError("D3D9 benchmark cannot select its rendering GPU. Use api=1 for multi-GPU systems.")
 
     # this will create all of the required folders
     os.makedirs(f"{session_directory}\\CSVs", exist_ok=True)
@@ -467,109 +489,170 @@ def main() -> int:
 
     kill_processes("xperf.exe", api_binname, presentmon_binary)
 
-    for cpu in benchmark_cpus:
-        LOG_CLI.info("benchmarking CPU %d", cpu)
+    try:
+        for cpu in benchmark_cpus:
+            LOG_CLI.info("benchmarking CPU %d", cpu)
 
-        if apply_affinity(hwids_gpu, cpu) != 0:
-            LOG_CLI.error(f"failed to apply affinity to CPU {cpu}")
-            return 1
-
-        time.sleep(5)
-
-        if (profile := cfg.msi_afterburner.profile) > 0:
-            start_afterburner(cfg.msi_afterburner.location, profile)
-
-        affinity_args: list[str] = []
-        if cfg.settings.sync_driver_affinity:
-            affinity_args.extend(["/affinity", hex(1 << cpu)])
-
-        subprocess.run(
-            ["start", "", *affinity_args, api_binpath, *subject_args],
-            shell=True,
-            check=True,
-        )
-
-        # 5s offset to allow subject to launch
-        time.sleep(5 + cfg.settings.cache_duration)
-
-        if cfg.xperf.enabled:
-            subprocess.run(
-                [cfg.xperf.location, "-on", "base+interrupt+dpc"],
-                check=True,
-            )
-
-        subprocess.run(
-            [
-                f"bin\\PresentMon\\{presentmon_binary}",
-                "-stop_existing_session",
-                "-no_top",
-                "-timed",
-                str(cfg.settings.benchmark_duration),
-                "-process_name",
-                api_binname,
-                "-output_file",
-                f"{session_directory}\\CSVs\\CPU-{cpu}.csv",
-                "-terminate_after_timed",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True,
-        )
-
-        if not os.path.exists(f"{session_directory}\\CSVs\\CPU-{cpu}.csv"):
-            LOG_CLI.error(
-                "csv log unsuccessful, this may be due to a missing dependency or windows component",
-            )
-            shutil.rmtree(session_directory)
-            if apply_affinity(hwids_gpu, apply=False) != 0:
-                LOG_CLI.error("failed to reset affinity")
+            if apply_affinity(hwids_gpu, cpu) != 0:
+                LOG_CLI.error(f"failed to apply affinity to CPU {cpu}")
                 return 1
 
-            return 1
+            time.sleep(5)
 
-        if cfg.xperf.enabled:
+            if (profile := cfg.msi_afterburner.profile) > 0:
+                start_afterburner(cfg.msi_afterburner.location, profile)
+
+            if cfg.settings.api == Api.LIBLAVA:
+                # Re-enabling the device may precede Vulkan ICD recovery by many seconds.
+                # Apply recovery and renderer fallback on every CPU, not just startup.
+                try:
+                    physical_device = wait_vulkan_device(target_gpu)
+                except RuntimeError as error:
+                    LOG_CLI.warning("%s. Trying the renderer directly.", error)
+                    physical_device = renderer.probe_device(
+                        api_binpath, target_gpu, len(gpus) + 2,
+                        os.path.join(session_directory, "renderer-logs", f"recovery-CPU-{cpu}"))
+                subject_args[0] = f"--physical_device={physical_device}"
+                # This binary buffers lava.log until normal exit. A short real
+                # renderer probe verifies its selected GPU before timed capture.
+                renderer.probe_device(api_binpath, target_gpu, len(gpus) + 2,
+                    os.path.join(session_directory, 'renderer-logs', f'preflight-CPU-{cpu}'),
+                    indices=[physical_device])
+            log_directory = os.path.join(session_directory, "renderer-logs")
+            os.makedirs(log_directory, exist_ok=True)
+            if cfg.settings.api == Api.LIBLAVA:
+                subject, log_path = renderer.launch(api_binpath, subject_args,
+                    os.path.join(log_directory, f'CPU-{cpu}'))
+            else:
+                log_path = os.path.join(log_directory, f'CPU-{cpu}.log')
+                with open(log_path, 'wb', buffering=0) as render_log:
+                    subject = subprocess.Popen([api_binpath, *subject_args],
+                        stdout=render_log, stderr=subprocess.STDOUT)
+            render_name = None
+            if cfg.settings.api == Api.LIBLAVA:
+                renderer.wait_window(subject)
+            if cfg.settings.sync_driver_affinity:
+                psutil.Process(subject.pid).cpu_affinity([cpu])
+            if cfg.settings.force_fullscreen:
+                display.force_fullscreen(subject, width, height)
+                LOG_CLI.info('Verified borderless fullscreen bounds: (0, 0, %d, %d)', width, height)
+
+            # 5s offset to allow subject to launch
+            time.sleep(5 + cfg.settings.cache_duration)
+
+            if subject.poll() is not None:
+                raise RuntimeError(f"Benchmark exited during warmup. See {log_path}")
+
+            if cfg.xperf.enabled:
+                subprocess.run(
+                    [cfg.xperf.location, "-on", "base+interrupt+dpc"],
+                    check=True,
+                )
+
             subprocess.run(
                 [
-                    cfg.xperf.location,
-                    "-d",
-                    f"{session_directory}\\xperf\\CPU-{cpu}.etl",
+                    f"bin\\PresentMon\\{presentmon_binary}",
+                    "-stop_existing_session",
+                    "-no_top",
+                    "-timed",
+                    str(cfg.settings.benchmark_duration),
+                    "-process_id",
+                    str(subject.pid),
+                    "-output_file",
+                    f"{session_directory}\\CSVs\\CPU-{cpu}.csv",
+                    "-terminate_after_timed",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=True,
             )
 
-            try:
+            if subject.poll() is not None:
+                raise RuntimeError(f"Benchmark exited during capture. See {log_path}")
+            csv_path = f"{session_directory}\\CSVs\\CPU-{cpu}.csv"
+            if os.path.exists(csv_path):
+                with open(csv_path, encoding="utf-8-sig") as capture:
+                    frame_rows = list(csv.DictReader(capture))
+                valid_frames = [row for row in frame_rows if any(
+                    key and key.lower() == "msbetweenpresents" and value and float(value) > 0
+                    for key, value in row.items())]
+                if len(valid_frames) < 2:
+                    raise RuntimeError(f"Capture contains fewer than two valid frames: {csv_path}")
+                process_affinity = psutil.Process(subject.pid).cpu_affinity()
+                if cfg.settings.api == Api.LIBLAVA:
+                    renderer.stop(subject)
+                    render_name = renderer.verify_log(log_path, target_gpu)
+                    LOG_CLI.info('Actual capture renderer GPU: %s (PID %d)', render_name, subject.pid)
+                evidence = {
+                    'cpu': cpu, 'target_name': target_gpu.name, 'target_pnp_id': target_gpu.hwid,
+                    'renderer_name': render_name, 'renderer_pid': subject.pid,
+                    'vulkan_device_index': physical_device if cfg.settings.api == Api.LIBLAVA else None,
+                    'resolution': [width, height], 'forced_fullscreen': cfg.settings.force_fullscreen,
+                    'process_affinity': process_affinity,
+                    'capture_seconds': cfg.settings.benchmark_duration,
+                    'valid_present_frames': len(valid_frames), 'csv_path': os.path.abspath(csv_path),
+                }
+                policy_path = f'SYSTEM\\CurrentControlSet\\Enum\\{target_gpu.hwid}\\Device Parameters\\Interrupt Management\\Affinity Policy'
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, policy_path) as key:
+                    evidence['device_policy'] = winreg.QueryValueEx(key, 'DevicePolicy')[0]
+                    evidence['assignment_mask_hex'] = winreg.QueryValueEx(key, 'AssignmentSetOverride')[0].hex()
+                with open(os.path.join(session_directory, f'CPU-{cpu}-validation.json'), 'w', encoding='utf-8') as report:
+                    json.dump(evidence, report, ensure_ascii=False, indent=2)
+                LOG_CLI.info('Captured %d valid present frames from PID %d', len(valid_frames), subject.pid)
+
+            if not os.path.exists(csv_path):
+                LOG_CLI.error(
+                    "csv log unsuccessful, this may be due to a missing dependency or windows component",
+                )
+                return 1
+
+            if cfg.xperf.enabled:
                 subprocess.run(
                     [
                         cfg.xperf.location,
-                        "-quiet",
-                        "-i",
+                        "-d",
                         f"{session_directory}\\xperf\\CPU-{cpu}.etl",
-                        "-o",
-                        f"{session_directory}\\xperf\\CPU-{cpu}.txt",
-                        "-a",
-                        "dpcisr",
                     ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     check=True,
                 )
-            except subprocess.CalledProcessError:
-                LOG_CLI.error("unable to generate dpcisr report")
-                shutil.rmtree(session_directory)
-                if apply_affinity(hwids_gpu, apply=False) != 0:
-                    LOG_CLI.error("failed to reset affinity")
-                    return 1  # return 1 after anyway
-                return 1
 
-            if not cfg.xperf.save_etls:
-                os.remove(f"{session_directory}\\xperf\\CPU-{cpu}.etl")
+                try:
+                    subprocess.run(
+                        [
+                            cfg.xperf.location,
+                            "-quiet",
+                            "-i",
+                            f"{session_directory}\\xperf\\CPU-{cpu}.etl",
+                            "-o",
+                            f"{session_directory}\\xperf\\CPU-{cpu}.txt",
+                            "-a",
+                            "dpcisr",
+                        ],
+                        check=True,
+                    )
+                except subprocess.CalledProcessError:
+                    LOG_CLI.error("unable to generate dpcisr report")
+                    return 1
 
-        kill_processes("xperf.exe", api_binname, presentmon_binary)
+                if not cfg.xperf.save_etls:
+                    os.remove(f"{session_directory}\\xperf\\CPU-{cpu}.etl")
 
-    # cleanup
-    if apply_affinity(hwids_gpu, apply=False) != 0:
-        LOG_CLI.error("failed to reset affinity")
-        return 1
+            kill_processes("xperf.exe", api_binname, presentmon_binary)
+
+    finally:
+        try:
+            kill_processes("xperf.exe", api_binname, presentmon_binary)
+            if cfg.xperf.enabled:
+                subprocess.run([cfg.xperf.location, "-stop"], check=False,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        finally:
+            if apply_affinity(hwids_gpu, apply=False) != 0:
+                raise RuntimeError("Failed to reset target GPU affinity")
+            if cfg.settings.api == Api.LIBLAVA:
+                wait_vulkan_device(target_gpu)
+            LOG_CLI.info('Target GPU affinity reset; driver recovery verified')
 
     if os.path.exists("C:\\kernel.etl"):
         os.remove("C:\\kernel.etl")
@@ -587,6 +670,9 @@ def _main() -> NoReturn:
         exit_code = main()
     except KeyboardInterrupt:
         sys.exit(1)
+    except (RuntimeError, ValueError, OSError) as e:
+        LOG_CLI.error("%s", e)
+        exit_code = 1
     except Exception:
         print(traceback.format_exc())
         exit_code = 1
@@ -596,11 +682,14 @@ def _main() -> NoReturn:
         num_processes = kernel32.GetConsoleProcessList(process_array, 1)
 
         # only pause if script was ran by double-clicking
-        if num_processes < 3:
+        if num_processes < 3 and sys.stdin.isatty() and '--non-interactive' not in sys.argv:
             input("press enter to exit")
 
         sys.exit(exit_code)
 
 
 if __name__ == "__main__":
+    # Dispatch before elevation/config/WMI and the interactive exit pause.
+    if sys.argv[1:] == ['--vulkan-query']:
+        sys.exit(vulkan_query_worker())
     _main()

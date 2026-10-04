@@ -1,52 +1,33 @@
-# AutoGpuAffinity (显卡中断绑定自动测试工具)
+# AutoGpuAffinity_Fix 1.1.3
 
-[![Downloads](https://img.shields.io/github/downloads/valleyofdoom/AutoGpuAffinity/total.svg)](https://github.com/valleyofdoom/AutoGpuAffinity/releases)
+维护与修改：**AnonyJcy**
 
-> **修改版 By: Anony**  
-> (修复了 Windows Terminal 吞行导致表格显示不全的 Bug，并修复了真全屏分辨率参数失效的问题)
+项目：[AnonyJcy/AutoGpuAffinity_Fix](https://github.com/AnonyJcy/AutoGpuAffinity_Fix) · [下载](https://github.com/AnonyJcy/AutoGpuAffinity_Fix/releases)
 
-<img src="/assets/img/example-output.png" width="1000">
+## 本版变化
 
-> [!IMPORTANT]
-> 免责声明：本人不对您的电脑造成的任何损坏负责。在测试期间重启 GPU 驱动程序时，可能会出现显卡驱动无响应的风险。一个可能的解决方案是在 BIOS 中将 PCIe 链路速度设置为主板支持的最大速度（而不是 Auto）。
+- 修复显卡驱动重启后 Vulkan 查询返回 -9：独立进程重新加载加载器与 ICD。
+- 按实际渲染显卡、进程 PID 和中断掩码保存采集证据；保留自动分辨率、强制全屏。
+- 增加无人值守参数与驱动重新启用保护。此旧版尚未包含后续刷新率锁帧修复，日常使用请下载最新版。
 
-## 使用方法
+## 使用
 
-```text
-AutoGpuAffinity
-GitHub - https://github.com/valleyofdoom
+Windows x64，以管理员权限运行，需要支持 Vulkan 的显卡驱动。本版按顺序测试单核心。自动分辨率和强制全屏保留。
 
-用法: AutoGpuAffinity [-h] [--config <配置文件>] [--analyze <CSV文件夹>] [--apply-affinity <核心编号>]
+配置与成绩默认位于 EXE 所在目录；需要解压完整 ZIP 并保留 bin 文件夹。
 
-可选参数:
-  -h, --help            显示此帮助信息并退出
-  --config <config>     指定配置文件的路径
-  --analyze <csv目录>   解析之前基准测试生成的 CSV 文件数据
-  --apply-affinity <cpu>
-                        为显卡驱动程序分配单个核心的亲和性 (绑定中断)
+测试会重启目标显卡驱动，请先保存工作。历史版本供查看演进，日常使用请选最新版。
+
+## 源码构建
+
+安装 Python 3.12 或更新版本，运行 BUILD.cmd；源码启动入口为 START.cmd。
+
+```powershell
+python -m pip install -r requirements.txt pyinstaller
+python -m unittest discover -s tests -v
+.\build.ps1
 ```
 
-- 如果要使用 xperf 记录 DPC/ISR 日志，必须安装 Windows ADK 中的 Windows Performance Toolkit (这一步是完全可选的)
+历史源码与对应 EXE 的核验方式见 [SOURCE-RECOVERY.md](SOURCE-RECOVERY.md)。本次整理没有重新进行所有版本的硬件全核跑分。
 
-  - [适用于 Windows 8.1+ 的 ADK](https://docs.microsoft.com/zh-cn/windows-hardware/get-started/adk-install)
-  - [适用于 Windows 7 的 ADK](http://download.microsoft.com/download/A/6/A/A6AC035D-DA3F-4F0C-ADA4-37C8E5D34E3D/setup/WinSDKPerformanceToolKit_amd64/wpt_x64.msi)
-
-- 如果有超频，请在整个测试过程中使用 MSI Afterburner 保持超频设置
-  - 将所需的超频设置保存到配置文件中（例如 profile 1）
-  - 在 `config.ini` 中配置 Afterburner 的路径和要加载的 profile
-
-- 运行 **AutoGpuAffinity.exe**，准备好开始测试后按回车键
-
-- 工具逐一测试完每个核心后，GPU 的亲和性将被重置为 Windows 默认值，并显示包含测试结果的汇总表。**绿色的数值**表示该指标下的最高值（最好），**黄色的数值**表示第二高的值。xperf 的报告可以在对应的 session 目录中找到。
-
-## 解析历史记录 (Analyze)
-
-随时可以通过将包含 CSV 的文件夹路径传给 `--analyze` 参数来解析旧的测试日志（见下例）。如果用户在结果显示时意外关闭了窗口，或者遇到了显示 Bug 导致看不全，此功能会非常有用。
-
-```bat
-.\AutoGpuAffinity.exe --analyze ".\captures\AutoGpuAffinity-170523162424\CSVs\"
-```
-
-## 独立基准测试 (Standalone Benchmarking)
-
-如果在 `config.ini` 中将 **custom_cpus** 设置为单个核心，AutoGpuAffinity 也可以作为一个常规的独立跑分工具使用。如果你通常不配置显卡驱动的中断亲和性，可以将数组设置为 `[0]`，因为图形内核通常默认运行在 CPU 0 上。请记住，一旦测试结束，AutoGpuAffinity 会将中断分配策略重置为默认的 Windows 状态（即没有指定特定的核心亲和性），因此，如果在日常使用中你有自己的一套绑定策略，请不要忘记在测试结束后重新手动配置回去。
+继续使用 [GPLv3](LICENSE)，保留上游 valleyofdoom/AutoGpuAffinity 与第三方署名，详见 [NOTICE.md](NOTICE.md)。

@@ -1,7 +1,7 @@
 import ctypes
 import ctypes.wintypes
 
-SETUPAPI = ctypes.windll.setupapi
+SETUPAPI = ctypes.WinDLL("setupapi", use_last_error=True)
 
 DIGCF_ALLCLASSES = 0x4
 DIGCF_DEVICEINTERFACE = 0x10
@@ -68,3 +68,7 @@ SetupDiSetClassInstallParamsA.restype = ctypes.wintypes.BOOL
 SetupDiCallClassInstaller = SETUPAPI.SetupDiCallClassInstaller
 SetupDiCallClassInstaller.argtypes = [ctypes.c_int32, ctypes.c_ssize_t, ctypes.POINTER(SP_DEVINFO_DATA)]
 SetupDiCallClassInstaller.restype = ctypes.wintypes.BOOL
+
+SetupDiDestroyDeviceInfoList = SETUPAPI.SetupDiDestroyDeviceInfoList
+SetupDiDestroyDeviceInfoList.argtypes = [ctypes.wintypes.HANDLE]
+SetupDiDestroyDeviceInfoList.restype = ctypes.wintypes.BOOL

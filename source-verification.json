@@ -1,0 +1,40 @@
+{
+  "version": "1.1.3",
+  "original_exe_sha256": "081b8a402477e12d834047ab355d11e3dd031543fe8309eb7e185d7f6405259c",
+  "original_zip_sha256": "5622068ee609907f7f79a546a6c250449fbf9092e4577bd29d4551232a90615d",
+  "all_first_party_modules_match": true,
+  "modules": {
+    "config": {
+      "normalized_code_sha256": "ae6e183bed9b439f84f107f5f60115614e2da6037875d1bda5f7a19dc74f5685",
+      "source_sha256": "77702a154497527fe0fa62fcc9e223fcd377e203301674878058d96a451ed38c"
+    },
+    "consts": {
+      "normalized_code_sha256": "65b0eee0f02b830275789e33d892b545d7f4e8e9346c2e91560a2bb5ba9f7fa0",
+      "source_sha256": "b86a0889245061caeb2b7b5a95c1a5dcfcc2f8e3a31adea2fa0ebfa62cedbc73"
+    },
+    "display": {
+      "normalized_code_sha256": "d7d1019a80ed24079de53e6fa3f3ad3dd83b46e96ac8a3ba232e40671c22d365",
+      "source_sha256": "a2123d1fef86f3f04f789694c50c039c6fc297f66032dabb7994c4df1342a5bb"
+    },
+    "framerate": {
+      "normalized_code_sha256": "ddc530e2e25f35de2e9999189be3b1b78bf38ad9e31b956b1a0c4a01539ea632",
+      "source_sha256": "f035b75c62e012076a2f719004c5da3db9679b3c9b81132a2664dc5f4ed98b36"
+    },
+    "gpu": {
+      "normalized_code_sha256": "7a9c6e36c53d43658bffe5f44d67ae94df948af5118ba27f4d05eab3181b39d8",
+      "source_sha256": "fe087d05430f5ab49eb14102ff7fcb9a03872dae21422b0cfb92b24f1482cd35"
+    },
+    "main": {
+      "normalized_code_sha256": "25b2040aa391bf18c71402a0e17b249354ae4e73e5489c00b5cce80c54aa3755",
+      "source_sha256": "82fc3706383149112b5d92f3579bbe330ea37a09d2e8032d17b6dd6dddec8f7d"
+    },
+    "renderer": {
+      "normalized_code_sha256": "697f12bf83dc8e04586288b7f81334fb71900ba480853d03dd99e89c047f0dcb",
+      "source_sha256": "b71423162f9837791a181ef5cea540f169b955598c08cba1c3136feee287b579"
+    },
+    "setupapi": {
+      "normalized_code_sha256": "e99c1a13cc439fad305b13b4b5035caa90bed949a0b7302a0e3824919314782a",
+      "source_sha256": "68ef10bdd7c5f108cdfc71fe2ab3265aa18792a7cb71872e76c9358ffb62b34e"
+    }
+  }
+}
