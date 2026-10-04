@@ -247,7 +247,7 @@ def kill_processes(*targets: str) -> None:
 def main() -> int:
     runtime.configure_console()
     logging.basicConfig(format='[%(name)s] %(levelname)s: %(message)s', level=logging.INFO)
-    print(f'AutoGpuAffinity 版本 {consts.VERSION} - GPLv3\n维护与修改：{consts.AUTHOR}\nGitHub - {consts.PROJECT_URL}\n')
+    print(f'AutoGpuAffinity 版本 {consts.VERSION} - GPLv3\n维护与修改：{consts.AUTHOR}\nGitHub - {consts.PROJECT_URL}\n禁止以本软件参与任何形式的收费优化\n')
     if not is_admin():
         LOG_CLI.error('需要管理员权限，请以管理员身份运行。')
         return 1
@@ -314,7 +314,7 @@ def main() -> int:
     pm_binary = str(bundled / 'bin/PresentMon' / presentmon_binary)
     mode = args.mode or 'simple'
     if not args.mode and (not args.non_interactive):
-        print('请选择测试模式：\n  1. 简单版：按顺序单核心测试（当前流程）\n  2. 增强版：普通单核心 → 真实超线程组合 → 乱序单核心')
+        print('请选择测试模式：\n  1. 简单版：按顺序单核心测试（当前流程）\n  2. 增强版：三轮综合测试')
         while True:
             choice = input('输入 1 或 2：').strip()
             if choice in ('1', '2'):

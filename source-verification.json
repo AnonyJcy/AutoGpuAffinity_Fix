@@ -1,7 +1,7 @@
 {
-  "version": "1.2.1",
-  "original_exe_sha256": "ebcbd7e68a15d7a64f67d05dcb8af1150a9015cb500a806898644c62002ef8fd",
-  "original_zip_sha256": "43ba6426da9f12c5c508a7a5255f3a36e350c59ef89d5f65a58bbbe43b132ace",
+  "version": "1.2.1-menu",
+  "original_exe_sha256": "aae074c9cef1b872f33dc1669fd65eb8d72b56acf06232af06f8a399f02365e8",
+  "original_zip_sha256": "9be2ce8ee6cc09040d628692689d5d1a735e7e8999a8d18e53a2a63c4447ff8f",
   "all_first_party_modules_match": true,
   "modules": {
     "benchmark_modes": {
@@ -45,8 +45,8 @@
       "source_sha256": "b2bfc95cfe483466777f04171ba1931471d9e9f6b0a777305eebe540bfbabb79"
     },
     "main": {
-      "normalized_code_sha256": "71962c11394551db9123da0e8559cf406a3c1c03b14bfc51147406debed7b47a",
-      "source_sha256": "baa9da3d8fe38582411512317c0f629376556fe9f5caee65d18d053ae95d7c93"
+      "normalized_code_sha256": "ee3ac78aa338e5be20c03aeaf8d55657c9a55be7ee5033ae74bea61cb2cadc59",
+      "source_sha256": "1a6938e37716ebcc877f00522c7abacbf3eb65386cecc232d1f70a57de9dedc6"
     },
     "presentation": {
       "normalized_code_sha256": "c7cf3100b7ab970877731ebae2c8cbfd37eacca3737dabcd6cac72f43d81a226",
