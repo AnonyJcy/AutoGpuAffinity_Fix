@@ -20,8 +20,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed; no package created.' }
     $exePath = Join-Path $PSScriptRoot 'build\AutoGpuAffinity\AutoGpuAffinity.exe'
     if (-not (Test-Path $exePath)) { throw 'Executable missing after build.' }
-    Copy-Item .\AutoGpuAffinity\bin .\build\AutoGpuAffinity\ -Recurse -Force
-    Copy-Item .\AutoGpuAffinity\config.ini .\build\AutoGpuAffinity\ -Force
+    # All renderer/PresentMon binaries and their runtime DLLs are embedded above.
     Copy-Item .\README.md, .\LICENSE, .\NOTICE.md .\build\AutoGpuAffinity\ -Force
     Write-Host 'Build succeeded: build\AutoGpuAffinity\AutoGpuAffinity.exe'
     exit 0
