@@ -1,7 +1,7 @@
 {
-  "version": "1.1.4",
-  "original_exe_sha256": "7d26371783f3481896eed5cfc89d1ca04e68cf915182d1e989ab4528bca705c1",
-  "original_zip_sha256": "48251683a79d5fab2c0691eb6a5acb7c97747a6dfd1a1f0e4af3a0871dc8e479",
+  "version": "1.1.5",
+  "original_exe_sha256": "0619331f6b0e7e1797bc61b41272208a4baab84416f3832ae5fb6e4d14ab762f",
+  "original_zip_sha256": "7414c12fecd8e5d0eef6f1b522c82fc76b211bb29ac5e1cea4b3ce540cbb7d6e",
   "all_first_party_modules_match": true,
   "modules": {
     "config": {
@@ -9,8 +9,8 @@
       "source_sha256": "b7e52ff6b05ba39bfe4a20734ffcdaf2809c69b486af75ee60c268e01a7d70ef"
     },
     "consts": {
-      "normalized_code_sha256": "53bc35c02d161c6d92359de4d69fae553f47e6adeeada4e59cc5ebbf5bf96784",
-      "source_sha256": "8a59fa86c14e37cdde052ea8bdefce8c4f1de94b0db472abf50dc0276935e76c"
+      "normalized_code_sha256": "71cef60070751b43d9a9de8a28ce31a3b0b3f0830a42913f55406aa369bc2cb4",
+      "source_sha256": "e64a81dff1ea8f5e9ce776881e26343423a72ff4838cea80a49394993a2195c3"
     },
     "display": {
       "normalized_code_sha256": "579361495ca73aa494036d25af491b4cd7b7f5e9d17012511d384dac3c44b8e0",
@@ -25,12 +25,16 @@
       "source_sha256": "fe087d05430f5ab49eb14102ff7fcb9a03872dae21422b0cfb92b24f1482cd35"
     },
     "main": {
-      "normalized_code_sha256": "565fc339a0b8c33153b527b04858bb8d7eb8d467c12ab4ee3106b94ed4cce98a",
-      "source_sha256": "a64ace98b083e9bfc86e792c6e8730b4864cc0b097d3443186674da554685b72"
+      "normalized_code_sha256": "6e33d15ef6629200a165f6ef3f1a60711da62c9a8b9ee6443b90998252d94266",
+      "source_sha256": "c1d54fea0ae8a9bc970781da03a5b1bd8df44b77d5b087dafea7ca52ec50b7cd"
     },
     "presentation": {
       "normalized_code_sha256": "c7cf3100b7ab970877731ebae2c8cbfd37eacca3737dabcd6cac72f43d81a226",
       "source_sha256": "abdba9dd86b642a7b1fb1281b98150967db1bab6506b7ca322c8981dcf364d1e"
+    },
+    "recommendation": {
+      "normalized_code_sha256": "96fb063d6803de80797a59e4c5a115715cbb27891e552e4b5f36da842871dec6",
+      "source_sha256": "b71e33250683d42cbcd0d529817d4ef585791c08bf39bf8327d04e71cbe795b1"
     },
     "renderer": {
       "normalized_code_sha256": "69a0b315d38a94d2e02631e8e0daaaae14bbc4043d67bfa111bc7b2ca6f89cc9",

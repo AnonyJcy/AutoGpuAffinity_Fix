@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'AutoGpuAffinity'))
 from main import display_results, restore_affinity
+import recommendation
 import winreg
 
 
@@ -20,7 +21,7 @@ class ResultTests(unittest.TestCase):
             (path / 'CPU-0.presentmon.log').write_text('PresentMon diagnostic output')
             (path / 'readme.txt').write_text('notes')
             stream = io.StringIO()
-            with contextlib.redirect_stdout(stream):
+            with contextlib.redirect_stdout(stream), patch('recommendation.display_recommendations'):
                 display_results(directory, False)
             self.assertIn('200.00', stream.getvalue())
 
