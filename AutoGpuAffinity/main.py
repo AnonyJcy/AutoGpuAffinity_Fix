@@ -314,7 +314,7 @@ def main() -> int:
     pm_binary = str(bundled / 'bin/PresentMon' / presentmon_binary)
     mode = args.mode or 'simple'
     if not args.mode and (not args.non_interactive):
-        print('请选择测试模式：\n  1. 简单版：按顺序单核心测试（当前流程）\n  2. 增强版：三轮综合测试')
+        print('请选择测试模式：\n  1. 简单版：按顺序单核心测试（时间短）\n  2. 增强版：三轮综合测试（时间长）')
         while True:
             choice = input('输入 1 或 2：').strip()
             if choice in ('1', '2'):

@@ -1,4 +1,4 @@
-# 1.2.1（界面更新） 验证记录
+# 1.2.2 验证记录
 
 本次对对应 EXE 的所有第一方 Python 模块进行了源码编译核验，结果全部匹配。详情见 source-verification.json 与 SOURCE-RECOVERY.md。
 

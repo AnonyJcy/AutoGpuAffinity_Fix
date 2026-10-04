@@ -1,7 +1,7 @@
 {
-  "version": "1.2.1-menu",
-  "original_exe_sha256": "aae074c9cef1b872f33dc1669fd65eb8d72b56acf06232af06f8a399f02365e8",
-  "original_zip_sha256": "9be2ce8ee6cc09040d628692689d5d1a735e7e8999a8d18e53a2a63c4447ff8f",
+  "version": "1.2.2",
+  "original_exe_sha256": "93d566bc830431a40536326cb904fc98ecbe366f95d51df650351fc6cfb071fe",
+  "original_zip_sha256": "4fd5aeae0bf1ec05a99667125f4a749ccfbab20027cc1fb188ccc9c5bb2efe6e",
   "all_first_party_modules_match": true,
   "modules": {
     "benchmark_modes": {
@@ -17,8 +17,8 @@
       "source_sha256": "9408fb6e233fbc266d5d66bfecea2e48afb74a0f0a45eaa04456813a90832c88"
     },
     "consts": {
-      "normalized_code_sha256": "8217b08c043137ec064153ab164e9753a41f1742a1c9d186c3f98af9c5d51782",
-      "source_sha256": "bbef057a6eb33f06e0b9aa428413d002a13aebe515872664c54913d8b9a532c4"
+      "normalized_code_sha256": "d961acb73b66b5718ecebc0bddee76b9af8356301e9466f36f9eebb36e792b1a",
+      "source_sha256": "b4b1b8b8c7fdb6394139a32783aeeafd840568be3990c3cb1af5f256a7314516"
     },
     "devices": {
       "normalized_code_sha256": "1e2467428de49e6d9f1cdea103ba64fc5d0197c55e653777dbcaccdfed1f6bbf",
@@ -45,8 +45,8 @@
       "source_sha256": "b2bfc95cfe483466777f04171ba1931471d9e9f6b0a777305eebe540bfbabb79"
     },
     "main": {
-      "normalized_code_sha256": "ee3ac78aa338e5be20c03aeaf8d55657c9a55be7ee5033ae74bea61cb2cadc59",
-      "source_sha256": "1a6938e37716ebcc877f00522c7abacbf3eb65386cecc232d1f70a57de9dedc6"
+      "normalized_code_sha256": "d6bbb2b71b75c268eeb629aa91867ccf3e486e0c177db1772a3455b6b7514406",
+      "source_sha256": "7418eb6a140440875c865d64464c83fa8bf628b9e1d748d382e75312e6965565"
     },
     "presentation": {
       "normalized_code_sha256": "c7cf3100b7ab970877731ebae2c8cbfd37eacca3737dabcd6cac72f43d81a226",
@@ -61,8 +61,8 @@
       "source_sha256": "ea15dc40f46933b97edc654bb2fbfb0ee8b4c7585da36b952233961341fddf67"
     },
     "runtime": {
-      "normalized_code_sha256": "ac4a12d498d6b74fa2aa9137e576ff6774f1938909a69f031f2653d6c6f436e6",
-      "source_sha256": "f268c9e18c92ef15516ced56f0c74618c00d422c1b609aabfb0441391255f446"
+      "normalized_code_sha256": "22030f1b36fcdd7bd30ca5dbc58cb3b62583c78a9a06c06e032e23136cc465b8",
+      "source_sha256": "1ffd51060f6a6b83c68973e2d78ebd72f315c4789cdf8ae9a400366ce39b8b14"
     },
     "setupapi": {
       "normalized_code_sha256": "e99c1a13cc439fad305b13b4b5035caa90bed949a0b7302a0e3824919314782a",

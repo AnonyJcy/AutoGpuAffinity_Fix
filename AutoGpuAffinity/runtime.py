@@ -5,28 +5,26 @@ import os
 from pathlib import Path
 import sys
 
+
 def configure_console():
     kernel = ctypes.WinDLL('kernel32')
     kernel.SetConsoleCP(65001)
     kernel.SetConsoleOutputCP(65001)
+    # Python's Windows console I/O uses Unicode; redirected files use UTF-8.
     for stream in (sys.stdout, sys.stderr):
         if stream is not None and hasattr(stream, 'reconfigure'):
             stream.reconfigure(encoding='utf-8', errors='backslashreplace')
     if sys.stdin is not None and hasattr(sys.stdin, 'reconfigure'):
         sys.stdin.reconfigure(encoding='utf-8', errors='strict')
 
+
 def resources():
     return Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 
+
 def initialize():
-    home = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
-    try:
-        from tempfile import TemporaryFile
-        with TemporaryFile(dir=home):
-            pass
-    except OSError:
-        home = Path(os.environ['LOCALAPPDATA']) / 'AutoGpuAffinity_Fix'
-        home.mkdir(parents=True, exist_ok=True)
+    home = Path(os.environ['LOCALAPPDATA']) / 'AutoGpuAffinity_Fix'
+    home.mkdir(parents=True, exist_ok=True)
     config = home / 'config.ini'
     if not config.exists():
         source = resources() / 'config.ini'
