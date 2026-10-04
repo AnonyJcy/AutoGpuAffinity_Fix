@@ -1,12 +1,12 @@
 {
-  "version": "1.2.3",
-  "original_exe_sha256": "2512c8a85db54f8ff2c78273082e89cec25bd65e6e7c62eaa8afb58d2c4f2c53",
-  "original_zip_sha256": "81576887b9ad6629c5fdd28b7b999891967a9df97b7b1e4b21e897a4dd0f88d7",
+  "version": "1.2.4",
+  "original_exe_sha256": "eba210d280309c4167843430b8bec2cec97a59c2085ebdda4c87813371856757",
+  "original_zip_sha256": "09228d3f8dbf2e0989a5e4bdf8d452f6c6973aae8733a311c583bd0910a3ea14",
   "all_first_party_modules_match": true,
   "modules": {
     "background_apps": {
-      "normalized_code_sha256": "689e23b84a2b69462b24923826997d80ea90e2ee513941a514cb25f8552787af",
-      "source_sha256": "f617e63848f12b9f41ac590a8aef9270fc75b2258ab115df73ea422a8a827c10"
+      "normalized_code_sha256": "4ed445728105cb53f42e14439defb8fc4fc88697332f17a5d1c8c4af72f52b16",
+      "source_sha256": "16b4a37c7ea9c33f82ab0e8b8151d5ab5458b605355f97e0ac5e0177c21e8d58"
     },
     "benchmark_modes": {
       "normalized_code_sha256": "7a501ff3f1e2dceeb7f35c749b9b31fcf7d03b5c35f9a5e9bcb8097eb6f99dda",
@@ -21,8 +21,8 @@
       "source_sha256": "9408fb6e233fbc266d5d66bfecea2e48afb74a0f0a45eaa04456813a90832c88"
     },
     "consts": {
-      "normalized_code_sha256": "8b26edc7b80cbd7e582b0e091e013536c6f933b9ad9f196cd277c5ff71088be9",
-      "source_sha256": "d32b0772e8eb3dd247b74e8ec42ab26347eebe44745d07ea57fd71e85011b879"
+      "normalized_code_sha256": "478d66433f9810d2216d4dfdf0848aac294f4f754ccd3e900dbf22a098b4bf4e",
+      "source_sha256": "db894c1f26d98f69035aa4642eb71e384f7f000ea55fc6d34f42dcccf6d16dc9"
     },
     "devices": {
       "normalized_code_sha256": "1e2467428de49e6d9f1cdea103ba64fc5d0197c55e653777dbcaccdfed1f6bbf",

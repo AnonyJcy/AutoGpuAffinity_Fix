@@ -4,6 +4,7 @@ from ctypes import wintypes
 import os
 from pathlib import Path
 import psutil
+import time
 APPS = {'chrome.exe': 'Chrome 浏览器', 'msedge.exe': 'Edge 浏览器', 'firefox.exe': 'Firefox 浏览器', 'brave.exe': 'Brave 浏览器', 'opera.exe': 'Opera 浏览器', 'steam.exe': 'Steam', 'epicgameslauncher.exe': 'Epic 游戏启动器', 'discord.exe': 'Discord', 'qq.exe': 'QQ', 'wechat.exe': '微信', 'weixin.exe': '微信', 'spotify.exe': 'Spotify', 'cloudmusic.exe': '网易云音乐', 'qqmusic.exe': 'QQ 音乐', 'bilibili.exe': '哔哩哔哩'}
 
 def session_id(pid):
@@ -27,10 +28,33 @@ def candidates():
             executable = process.exe()
             if process.pid in protected or name not in APPS or (not executable) or (process.username() != username) or (session_id(process.pid) != session) or Path(executable).resolve().is_relative_to(windows):
                 continue
-            result.append({'pid': process.pid, 'created': process.create_time(), 'exe': executable, 'name': name, 'label': APPS[name]})
+            result.append({'pid': process.pid, 'created': process.create_time(), 'exe': executable, 'name': name, 'label': APPS[name], 'memory_bytes': process.memory_info().rss, 'cpu_seconds': sum(process.cpu_times()[:2])})
         except (psutil.Error, OSError):
             continue
-    return sorted(result, key=lambda item: (item['label'], item['pid']))
+    return result
+
+def ranked_apps(items):
+    """Measure a shared interval, aggregate software processes, show at most ten."""
+    if not items:
+        return []
+    started = time.monotonic()
+    time.sleep(0.3)
+    groups = {}
+    for item in items:
+        try:
+            process = psutil.Process(item['pid'])
+            if process.create_time() != item['created'] or process.exe() != item['exe']:
+                continue
+            seconds = sum(process.cpu_times()[:2])
+            cpu = max(0, seconds - item['cpu_seconds']) / (time.monotonic() - started) * 100 / (os.cpu_count() or 1)
+            memory = process.memory_info().rss
+        except (psutil.Error, OSError):
+            continue
+        group = groups.setdefault(item['label'], {'label': item['label'], 'items': [], 'cpu': 0, 'memory': 0})
+        group['items'].append(item)
+        group['cpu'] += cpu
+        group['memory'] += memory
+    return sorted(groups.values(), key=lambda group: (-group['cpu'], -group['memory'], group['label']))[:10]
 
 def close_windows(pids):
     """Send WM_CLOSE to top-level windows; applications retain save/exit dialogs."""
@@ -60,28 +84,17 @@ def assist(non_interactive=False):
         return
     print('\n是否辅助关闭后台软件？减少后台干扰有助于比较成绩。')
     print('仅处理识别到的常见浏览器、聊天、音乐和游戏启动器；系统、安全、驱动、同步及未知程序不处理。')
-    if input('输入 1 查看并选择；直接回车跳过：').strip() != '1':
-        return
-    items = candidates()
-    if not items:
+    groups = ranked_apps(candidates())
+    if not groups:
         print('没有识别到可辅助关闭的软件；其他后台请自行检查。')
         return
-    for index, item in enumerate(items, 1):
-        print(f"  {index}. {item['label']} [{item['name']}，PID {item['pid']}]\n     {item['exe']}")
+    print('按软件合并，按 CPU 占用排序，同占用时比较内存；最多列出前 10 个软件。')
+    for group in groups:
+        print(f"  {group['label']}：{len(group['items'])} 个进程，CPU {group['cpu']:.1f}%，内存合计 {group['memory'] / 1024 ** 2:.0f} MB")
     print('请先保存工作。只请求正常退出；保存提示或仍运行的后台不会被强制结束。关闭后不会自动重新打开。')
-    choice = input('输入要关闭的编号（逗号分隔），或“全部”；直接回车取消：').strip()
-    if not choice:
+    if input('输入 1 全部关闭上述软件；回车跳过：').strip() != '1':
         return
-    try:
-        selected = items if choice == '全部' else [items[index - 1] for index in sorted({int(value.strip()) for value in choice.replace('，', ',').split(',')}) if 1 <= index <= len(items)]
-        if choice != '全部' and any((not 1 <= int(value.strip()) <= len(items) for value in choice.replace('，', ',').split(','))):
-            raise ValueError()
-    except ValueError:
-        print('编号无效，本次未关闭任何软件。')
-        return
-    if input('输入“确认关闭”请求退出所选软件；其他输入取消：').strip() != '确认关闭':
-        print('已取消关闭。')
-        return
+    selected = [item for group in groups for item in group['items']]
     current = {(item['pid'], item['created'], item['exe']): item for item in candidates()}
     processes = []
     for item in selected:
@@ -96,6 +109,9 @@ def assist(non_interactive=False):
     sent = close_windows({process.pid for process in processes})
     gone, alive = psutil.wait_procs(processes, timeout=5)
     print(f'已退出 {len(gone)} 个进程。')
-    for process in alive:
-        print(f'  PID {process.pid}：' + ('仍在运行，请自行处理退出/保存提示。' if process.pid in sent else '没有可接收退出请求的窗口，请自行关闭。'))
+    alive_ids = {process.pid for process in alive}
+    for group in groups:
+        remaining = [item['pid'] for item in group['items'] if item['pid'] in alive_ids]
+        if remaining:
+            print(f"  {group['label']}：仍有 {len(remaining)} 个进程，请自行处理退出/保存提示。")
     input('确认后台状态后按回车继续跑分：')
