@@ -155,22 +155,49 @@ def inventory_devices():
                 'class': device.PNPClass or '', 'service': device.Service or ''}
     inputs = [resolve_input(item, inventory, tree) for item in inventory.values()
               if item['class'] in ('Keyboard', 'Mouse')]
-    timers = []
-    for item in inventory.values():
-        identifier = item['id'].upper()
-        if identifier.startswith(('ACPI\\PNP0100\\', 'ACPI\\PNP0103\\')):
-            resources = tree.irq_resources(item['id'])
-            supported = bool(resources['allocated']['irqs'])
-            reason = ('检测到已分配 IRQ：' + ','.join(map(str, resources['allocated']['irqs'])) if supported
-                      else '未检测到已分配 IRQ，不自动绑定')
-            if not supported and resources['boot']['irqs']:
-                reason += '；仅启动配置 IRQ：' + ','.join(map(str, resources['boot']['irqs']))
-            if not supported and any(resources[name]['descriptors'] for name in ('filtered', 'basic')):
-                reason += '；资源需求存在，不代表运行时已分配'
-            timers.append({'device': item, 'kind': 'hpet' if 'PNP0103' in identifier else 'system_timer',
-                           'target': item if supported else None,
-                           'reason': reason, 'irq_resources': resources})
+    timers = [describe_timer(item, tree) for item in inventory.values()
+              if item['id'].upper().startswith(('ACPI\\PNP0100\\', 'ACPI\\PNP0103\\'))]
     return {'machine': platform.node(), 'inputs': inputs, 'timers': timers}
+
+
+TIMER_NAMES = {'system_timer': '系统计时器', 'hpet': '高精度计时器'}
+
+def describe_timer(item, tree):
+    """Classify why a timer is or is not bindable.
+
+    Only an *allocated* IRQ is bindable. Boot/basic/filtered entries describe
+    requirements, not runtime ownership: the system timer's boot configuration is
+    the shared IRQ0 time base, and binding it would pin the whole machine's time
+    source to one core. Refusing those is deliberate, so the reason must say
+    which case was hit instead of a generic "not detected".
+    """
+    identifier = item['id'].upper()
+    kind = 'hpet' if 'PNP0103' in identifier else 'system_timer'
+    resources = tree.irq_resources(item['id'])
+    allocated = resources['allocated']['irqs']
+    status, target = 'missing_irq', None
+    if allocated:
+        status, target = 'bindable', item
+        reason = '已分配 IRQ ' + ','.join(map(str, allocated))
+    elif resources['forced']['irqs']:
+        reason = '仅有强制配置 IRQ ' + ','.join(map(str, resources['forced']['irqs'])) + '，不是运行时分配'
+    elif resources['boot']['irqs']:
+        numbers = ','.join(map(str, resources['boot']['irqs']))
+        if kind == 'system_timer':
+            reason = f'只有启动配置 IRQ {numbers}（系统时基，与全机共享），绑定会限制全局时间源，故不绑定'
+        else:
+            reason = f'只有启动配置 IRQ {numbers}，不是运行时分配，不绑定'
+    elif any(resources[name]['descriptors'] for name in ('filtered', 'basic')):
+        reason = '只有资源配置需求，没有已分配 IRQ'
+        if any(resources[name]['errors'] for name in resources) or \
+           any(resources[name]['log_status'] != 0 for name in resources if 'log_status' in resources[name]):
+            reason += '（枚举未返回分配配置）'
+    elif kind == 'hpet':
+        reason = '设备存在但未报告任何 IRQ 描述符：BIOS 未启用 HPET 或系统改用其它定时源'
+    else:
+        reason = '设备存在但未报告任何 IRQ 描述符，不绑定'
+    return {'device': item, 'kind': kind, 'name': TIMER_NAMES[kind], 'status': status,
+            'target': target, 'reason': reason, 'irq_resources': resources}
 
 
 def policy_path(device_id):

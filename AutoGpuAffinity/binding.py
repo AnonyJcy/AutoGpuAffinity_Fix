@@ -3,7 +3,9 @@ import datetime
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
+import platform
 import devices
 import recommendation
 import wmi
@@ -11,15 +13,17 @@ import wmi
 
 def show_inventory(data=None):
     data = devices.inventory_devices() if data is None else data
-    print('当前输入设备及中断目标：')
+    print('输入设备：')
     for item in data['inputs']:
         names = list(dict.fromkeys(node['bus_name'] for node in item['chain'] if node.get('bus_name')))
-        print(f"  {item['device']['name']} {' / '.join(names)}\n    实例：{item['device']['id']}")
-        print(f"    中断目标：{item['target']['name']} [{item['target']['id']}]；{item['reason']}"
-              if item['target'] else f"    跳过：{item['reason']}")
-    print('当前计时器：')
+        label = f"{item['device']['name']}" + (f"（{' / '.join(names)}）" if names else '')
+        if item['target']:
+            print(f"  {label} → {item['target']['name']}；{item['reason']}")
+        else:
+            print(f"  {label} → 跳过；{item['reason']}")
+    print('计时器：')
     for item in data['timers']:
-        print(f"  {item['device']['name']} [{item['device']['id']}]：{item['reason']}")
+        print(f"  {item['name']}：{item['reason']}")
     if not data['timers']:
         print('  未发现系统计时器或 HPET PnP 实例；不猜测绑定。')
     return data
@@ -72,7 +76,7 @@ def build_plan(session):
         plan.extend(grouped.values())
     timers = report['recommended']['timer']
     if timers:
-        plan.extend({'role': '高精度计时器' if item['kind'] == 'hpet' else '系统计时器',
+        plan.extend({'role': item['name'],
                      'id': item['target']['id'], 'name': item['target']['name'], 'cpus': timers['cpus'],
                      'sources': [item['device']['id']]} for item in inventory['timers'] if item['target'])
     return plan, inventory, report
@@ -82,22 +86,26 @@ def confirm_binding(session, non_interactive=False):
     if non_interactive:
         print('无人值守模式不应用设备绑定；请交互运行 --bind-from <会话目录> 审核确认。')
         return 0
-    plan, inventory, report = build_plan(session)
+    plan, inventory = build_plan(session)[:2]
     output = Path(session).resolve() / 'binding-plan.json'
     output.write_text(json.dumps({'plan': plan, 'inventory': inventory}, ensure_ascii=False, indent=2), encoding='utf-8')
-    print('\n请核对绑定方案：')
-    for item in plan:
-        print(f"  {item['role']}：{item['name']}\n    {item['id']}\n    CPU {','.join(map(str, item['cpus']))}，掩码 0x{sum(1 << cpu for cpu in item['cpus']):X}")
-        if item.get('shared_controller'):
-            print('    注意：绑定 USB 主控制器会影响该控制器上所有设备，不仅是鼠标键盘。')
-    print(f'完整设备对应关系与方案：{output}')
     if not plan:
         print('没有可绑定的合格设备，本次不修改配置。')
         return 0
+    print('\n绑定方案：')
+    for item in plan:
+        mask = sum(1 << cpu for cpu in item['cpus'])
+        print(f"  {item['role']}  {item['name']}  →  CPU {','.join(map(str, item['cpus']))}（0x{mask:X}）")
+    notes = []
+    if any(item.get('shared_controller') for item in plan):
+        notes.append('USB 主控制器为整条控制器绑定，其上所有设备同时受影响。')
     if not report['all_logical_cpus_measured']:
-        print('本次只测了部分核心，候选不代表全 CPU 最优。')
-    print('鼠标键盘/计时器方案依据 FPS 指标，尚未测量实际设备延迟。')
-    if input('设备和核心确认无误后，输入“确认绑定”应用；其他输入取消：').strip() != '确认绑定':
+        notes.append('本次只测了部分核心，候选不代表全 CPU 最优。')
+    notes.append('鼠标键盘/计时器方案依据 FPS 指标，未测量实际设备延迟。')
+    for note in notes:
+        print(f'  注意：{note}')
+    print(f'完整设备对应关系：{output}')
+    if input('确认无误后输入“确认绑定”应用；其他输入取消：').strip() != '确认绑定':
         print('已取消，未修改设备绑定。')
         return 0
     # Refresh the live device tree after the user reviewed the plan.
@@ -109,7 +117,93 @@ def confirm_binding(session, non_interactive=False):
         raise ValueError('确认期间处理器拓扑发生变化，未应用绑定。')
     backup = Path(session).resolve() / ('affinity-backup-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f') + '.json')
     devices.apply_transaction(plan, backup)
-    print(f'已写入并核验注册表策略，等待设备重新启动后生效。\n建议立即手动重启电脑，之后验证实际效果。\n恢复备份：{backup}\n恢复命令：AutoGpuAffinity.exe --restore-affinity "{backup}"')
+    remember_backup(backup)
+    print('\n绑定已写入注册表，重启后才会生效。')
+    print(f'  重启后运行 --verify-binding 检测是否生效')
+    print(f'  恢复原设置：--restore-affinity "{backup}"')
+    return 0
+
+
+BACKUP_POINTER = 'last-affinity-backup.txt'
+
+def pointer_path():
+    """Remember the latest backup outside the session folder so a reboot can find it."""
+    home = Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'AutoGpuAffinity_Fix'
+    return home / BACKUP_POINTER
+
+def remember_backup(path):
+    try:
+        target = pointer_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(str(Path(path).resolve()), encoding='utf-8')
+    except OSError:
+        pass  # Verification still works; --verify-binding would need the explicit path.
+
+def latest_backup():
+    try:
+        path = Path(pointer_path().read_text(encoding='utf-8').strip())
+    except (OSError, UnicodeError):
+        return None
+    return path if path.is_file() else None
+
+def describe_applied(backup, tree=None):
+    """Effective mask per device, comparing the live registry against the backup."""
+    tree = devices.DeviceTree() if tree is None else tree
+    rows = []
+    for item in backup['devices']:
+        live = devices.read_policy(item['id'])
+        after, before = item.get('after') or {}, item.get('before') or {}
+        mask = None
+        raw = (live.get('AssignmentSetOverride') or {}).get('value')
+        if isinstance(raw, str):
+            try:
+                mask = int.from_bytes(bytes.fromhex(raw), 'little')
+            except ValueError:
+                mask = None
+        matches_after = live == after
+        reverted = live == before
+        if tree.locate(item['id']) is None:
+            state = '设备不在本机'
+        elif matches_after and mask is not None:
+            state = '策略已生效'
+        elif matches_after:
+            state = '策略未设置亲和性'
+        elif reverted:
+            state = '策略未生效（已回退到原值）'
+        else:
+            state = '策略被其他工具更改'
+        rows.append({'id': item['id'], 'mask': mask, 'state': state, 'live': live})
+    return rows
+
+def verify_binding(backup_path=None, non_interactive=False, tree=None):
+    """Post-reboot check: does the live registry still hold what we wrote?"""
+    path = Path(backup_path).resolve() if backup_path else latest_backup()
+    if path is None or not path.is_file():
+        print(f'未找到绑定备份记录。请用 --verify-binding "<备份.json>" 指定，'
+              f'或先执行一次绑定。')
+        return 0
+    backup = json.loads(path.read_text(encoding='utf-8-sig'))
+    if backup.get('machine') != platform.node():
+        raise ValueError('备份来自另一台电脑，拒绝检测。')
+    if backup.get('status') not in ('applied_pending_reboot', 'verified'):
+        print(f'该备份状态为 {backup.get("status")}，没有待验证的绑定。')
+        return 0
+    rows = describe_applied(backup, tree)
+    print(f'绑定检测（备份：{path.name}）')
+    for item, row in zip(backup['devices'], rows):
+        mask = f"CPU 掩码 0x{row['mask']:X}" if row['mask'] is not None else '无亲和性掩码'
+        print(f"  {item['id']}")
+        print(f"    {row['state']}；{mask}")
+    confirmed = [row for row in rows if row['state'] == '策略已生效']
+    print(f'结果：{len(confirmed)}/{len(rows)} 个设备策略仍在。')
+    print('提示：此处核对的是持久化的中断亲和性策略；中断到核心的实际映射由 Windows 内核负责。')
+    if len(confirmed) != len(rows):
+        print('若有设备未生效，请确认已经重启，或重新运行一次绑定。')
+    else:
+        backup['status'] = 'verified'
+        path.write_text(json.dumps(backup, ensure_ascii=False, indent=2), encoding='utf-8')
+    if non_interactive:
+        return 0 if len(confirmed) == len(rows) else 1
     return 0
 
 

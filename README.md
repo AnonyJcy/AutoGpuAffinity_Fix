@@ -3,7 +3,7 @@
 [![Windows checks](https://github.com/AnonyJcy/AutoGpuAffinity_Fix/actions/workflows/check.yml/badge.svg)](https://github.com/AnonyJcy/AutoGpuAffinity_Fix/actions/workflows/check.yml)
 [![Downloads](https://img.shields.io/github/downloads/AnonyJcy/AutoGpuAffinity_Fix/total.svg)](https://github.com/AnonyJcy/AutoGpuAffinity_Fix/releases)
 
-维护与修改：**AnonyJcy** · 当前版本：**1.2.5**
+维护与修改：**AnonyJcy** · 当前版本：**1.2.6**
 
 在 Windows 上实际测试不同 CPU 核心的显卡中断亲和性，保留完整帧率成绩，并生成显卡、鼠标键盘及计时器的候选绑定方案。针对 P106 等显卡驱动重启后 Vulkan 查询失败的问题，使用独立进程重新加载 Vulkan 并核验实际渲染卡。
 

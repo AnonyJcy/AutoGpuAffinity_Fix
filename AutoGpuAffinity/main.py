@@ -385,6 +385,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--list-devices', action='store_true', help='只读列出输入设备、中断目标和计时器')
     parser.add_argument('--prepare-background', action='store_true', help='仅辅助关闭后台软件，不开始跑分')
     parser.add_argument('--bind-from', metavar='<session>', help='从完整实测会话生成绑定方案，确认后应用')
+    parser.add_argument('--verify-binding', metavar='<backup.json>', nargs='?', const=True,
+                        help='重启后检测上次绑定是否仍然生效；不带参数时使用最近一次备份')
     parser.add_argument('--restore-affinity', metavar='<backup.json>', help='核对并恢复本机绑定备份，确认后执行')
 
     return parser.parse_args()
@@ -416,9 +418,9 @@ def main() -> int:
 
     args = parse_args()
     # Resolve user paths before changing CWD; bundled assets never live beside config.
-    for attribute in ('config', 'analyze', 'bind_from', 'restore_affinity'):
+    for attribute in ('config', 'analyze', 'bind_from', 'restore_affinity', 'verify_binding'):
         value = getattr(args, attribute)
-        if value:
+        if value and value is not True:
             setattr(args, attribute, os.path.abspath(value))
     work_directory = runtime.initialize()
     os.chdir(work_directory)
@@ -433,6 +435,10 @@ def main() -> int:
     if args.restore_affinity:
         import binding
         return binding.confirm_restore(args.restore_affinity, args.non_interactive)
+    if args.verify_binding:
+        import binding
+        explicit = None if args.verify_binding is True else args.verify_binding
+        return binding.verify_binding(explicit, args.non_interactive)
     if args.bind_from:
         import binding
         return binding.confirm_binding(args.bind_from, args.non_interactive)
@@ -500,13 +506,20 @@ def main() -> int:
     pm_binary = str(bundled / 'bin/PresentMon' / presentmon_binary)
     mode = args.mode or 'simple'
     if not args.mode and not args.non_interactive:
+        import binding
+        pending = binding.latest_backup()
         print('请选择测试模式：\n  1. 简单版：按顺序单核心测试（时间短）\n  2. 增强版：三轮综合测试（时间长）')
+        if pending:
+            print('  3. 检测上次绑定：确认重启后的中断亲和性是否仍然生效')
         while True:
-            choice = input('输入 1 或 2：').strip()
+            choice = input('输入 1 或 2，或 3：' if pending else '输入 1 或 2：').strip()
             if choice in ('1', '2'):
                 mode = 'enhanced' if choice == '2' else 'simple'
                 break
-            print('请输入 1 或 2。')
+            if choice == '3' and pending:
+                binding.verify_binding(None, False)
+                return 0
+            print('请输入 1 或 2，或 3。' if pending else '请输入 1 或 2。')
     lock_benchmark()
     import background_apps
     background_apps.assist(args.non_interactive)
