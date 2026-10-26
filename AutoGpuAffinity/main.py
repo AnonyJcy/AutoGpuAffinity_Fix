@@ -15,6 +15,7 @@ import traceback
 import winreg
 from typing import NoReturn
 
+import console
 import consts
 import framerate
 import display
@@ -950,6 +951,8 @@ def _main() -> NoReturn:
 
 
 if __name__ == "__main__":
+    # Keep Chinese output working on consoles whose code page cannot encode it.
+    console.harden()
     # Dispatch before elevation/config/WMI and the interactive exit pause.
     if sys.argv[1:] == ['--vulkan-query']:
         sys.exit(vulkan_query_worker())

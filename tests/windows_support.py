@@ -13,6 +13,13 @@ for real (``python -m unittest discover -s tests`` on windows-latest CI).
 import functools
 import sys
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'AutoGpuAffinity'))
+# Test output mixes Chinese with the console code page; without this, printing a
+# failure message on a cp1252 runner raises UnicodeEncodeError and hides the
+# real result.  Importing the program module applies the same guard it uses.
+import console  # noqa: F401  (imported for the side effect)
 
 WINDOWS_ONLY_MODULES = ('winreg', 'win32api', 'win32con', 'win32gui', 'win32process', 'wmi', 'pythoncom')
 
