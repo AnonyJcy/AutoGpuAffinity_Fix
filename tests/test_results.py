@@ -8,6 +8,9 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'AutoGpuAffinity'))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import windows_support
+windows_support.require('winreg', 'wmi', 'win32api')
 from main import display_results, restore_affinity
 import winreg
 
