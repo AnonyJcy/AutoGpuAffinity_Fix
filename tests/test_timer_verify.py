@@ -76,6 +76,21 @@ class TimerClassificationTests(unittest.TestCase):
         self.assertEqual(timer['status'], 'missing_irq')
         self.assertIn('强制', timer['reason'])
 
+    def test_missing_log_status_does_not_raise(self):
+        # irq_configuration() omits log_status when the device node is absent or
+        # the first log query fails; the reason builder must tolerate that.
+        tree = type('Tree', (), {'irq_resources': lambda self, device_id: {
+            'allocated': {'irqs': [], 'descriptors': [], 'errors': ['设备不存在']},
+            'filtered': {'irqs': [], 'descriptors': [], 'errors': []},
+            'basic': {'irqs': [], 'descriptors': [{'count': 1}], 'errors': []},
+            'boot': {'irqs': [], 'descriptors': [], 'errors': []},
+            'forced': {'irqs': [], 'descriptors': [], 'errors': []},
+        }})()
+        item = {'id': r'ACPI\PNP0100\4&1FEB96E6&0', 'name': 'x', 'class': 'System', 'service': ''}
+        timer = devices.describe_timer(item, tree)
+        self.assertIn('没有已分配 IRQ', timer['reason'])
+        self.assertIn('枚举未返回分配配置', timer['reason'])
+
     def test_distinct_reasons_for_system_timer_and_hpet(self):
         system = self.describe(r'ACPI\PNP0100\4&1FEB96E6&0', boot=[0], descriptors=True)
         hpet = self.describe(r'ACPI\PNP0103\2&DABA3FF&0')

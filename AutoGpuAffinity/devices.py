@@ -189,8 +189,9 @@ def describe_timer(item, tree):
             reason = f'只有启动配置 IRQ {numbers}，不是运行时分配，不绑定'
     elif any(resources[name]['descriptors'] for name in ('filtered', 'basic')):
         reason = '只有资源配置需求，没有已分配 IRQ'
-        if any(resources[name]['errors'] for name in resources) or \
-           any(resources[name]['log_status'] != 0 for name in resources if 'log_status' in resources[name]):
+        # log_status is absent when enumeration stopped before querying the log
+        # configuration, so never index it unconditionally.
+        if any(resources[name]['errors'] or resources[name].get('log_status', 0) for name in resources):
             reason += '（枚举未返回分配配置）'
     elif kind == 'hpet':
         reason = '设备存在但未报告任何 IRQ 描述符：BIOS 未启用 HPET 或系统改用其它定时源'
